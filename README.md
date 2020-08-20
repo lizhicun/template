@@ -149,3 +149,174 @@ void workWithIterator(IterT iter){
 * 声明template参数时，class与typename意义相同。
 * 必须用typename标识嵌套从属类型名称，但在base class lists && member initialization list中禁止使用。
 
+### 条款44.处理模板化基类内的名称
+
+#### 场景
+假定我们需要撰写一个程序，它需要传递信息至不同的公司。信息或者是明文，或者是密码。如果我们在编译期可以确定发送至哪家公司，就可以采用基于template的解决方案  
+```
+class CompanyA{
+public:
+    ...
+    void sendCleartext(const string& msg);
+    void sendEncrypted(const string& msg);
+    ...
+};
+class CompanyB{
+public:
+    ...
+    void sendCleartext(const string& msg);
+    void sendEncrypted(const string& msg);
+    ...
+};
+class MsgInfo {...};//保存信息
+template<typenmae Company>
+class MsgSender{
+public:
+    ...
+    void sendClear(const MsgInfo& info){
+        string msg;
+        //根据info产生信息
+        Company c;
+        c.sendCleartext(msg);
+    }
+    void sendSecret(const MsgInfo& info);
+};
+```
+但如果我们希望在每次发送信息时完成记录，我们通过派生一个derived class来完成这种行为:
+```
+template<typenmae Company>
+class LoggingMsgSender:public MsgSender<Company>{
+public:
+    ...
+    void sendClearMsg(const MsgInfo& info){//避免遮蔽名称
+        //log sth
+        sendClear(info);//试图调用base class函数,无法编译
+        //log sth
+    }
+};
+```
+编译器会拒绝编译，并给出sendClear不存在这样的错误信息.
+
+#### 问题剖析
+报错原因在于，当编译器遭遇class template LoggingMsgSender定义式时，并不了解其基类，因为此时基类尚未被具现化。再具体一些，我们假定有CompanyZ坚持使用加密通讯：
+```
+class CompanyZ{
+public:
+    ...//不提供sendClear
+    void sendEncrypted(const string& msg);
+    ...
+};
+```
+那一般化的MsgSender template对CompanyZ并不合适，因为该template提供了sendClear。因此我们针对CompanyZ做出了一个特化：
+```
+template<>//全特化
+class MsgSender<CompanyZ>{
+public:
+    ...
+    void sendSecret(const MsgInfo& info);
+};
+```
+插播一则模板的全特化，偏特化。  
+全特化
+```
+#include <iostream>
+using namespace std;
+
+template<typename T1, typename T2>
+class A{
+        public:
+                void function(T1 value1, T2 value2){
+                        cout<<"value1 = "<<value1<<endl;
+                        cout<<"value2 = "<<value2<<endl;
+                }
+};
+
+template<>
+class A<int, double>{ // 类型明确化，为全特化类
+        public:
+                void function(int value1, double value2){
+                        cout<<"intValue = "<<value1<<endl;
+                        cout<<"doubleValue = "<<value2<<endl;
+                }
+};
+
+int main(){
+        A<int, double> a;
+        a.function(12, 12.3);
+        return 0;
+}                     
+```
+片特化
+```
+template<typename T1, typename T2>
+class A{
+        public:
+                void function(T1 value1, T2 value2){
+                        cout<<"value1 = "<<value1<<endl;
+                        cout<<"value2 = "<<value2<<endl;
+                }
+};
+
+template<typename T>
+class A<T, double>{ // 部分类型明确化，为偏特化类
+        public:
+                void function(T value1, double value2){
+                        cout<<"Value = "<<value1<<endl;
+                        cout<<"doubleValue = "<<value2<<endl;
+                }
+};
+
+int main(){
+        A<char, double> a;
+        a.function('a', 12.3);
+        return 0;
+}
+```
+对主版本模板类、全特化类、偏特化类的调用优先级从高到低进行排序是：  
+全特化类>偏特化类>主版本模板类
+插播结束，继续考虑derived class LoggingMsgSender
+```
+template<typenmae Company>
+class LoggingMsgSender:public MsgSender<Company>{
+public:
+    ...
+    void sendClearMsg(const MsgInfo& info){
+        //log sth
+        sendClear(info);//如果参数为CompanyZ，该函数不存在
+        //log sth
+    }
+};
+```
+如今我们可以清楚地看出编译器拒绝调用的原因：base class template可能被特化，且特化版本可能不具备与一般性版本一致的接口。编译器拒绝在templated base classes内寻找继承而来的名称，面向对象的规则在泛型编程中依然不再适用。
+
+#### 解决方案
+* 使用this->
+```
+template<typenmae Company>
+class LoggingMsgSender:public MsgSender<Company>{
+public:
+    ...
+    void sendClearMsg(const MsgInfo& info){
+        //log sth
+        this->sendClear(info);//假设继承了sendClear，隐式接口
+        //log sth
+    }
+};
+```
+* 使用using
+```
+template<typenmae Company>
+class LoggingMsgSender:public MsgSender<Company>{
+public:
+    using MsgSender<Company>::sendClear;//假设存在
+    ...
+    void sendClearMsg(const MsgInfo& info){
+        //log sth
+        sendClear(info);
+        //log sth
+    }
+};
+```
+#### 总结
+上述的三种方法其实都是在做同一件事：对编译器承诺“base class template的任何特化版本都将支持其一般版本所提供的接口”。
+面对“指涉base class mrmbers”的无效references，编译器的诊断可能在早期（当解析dc template的定义式时），也可能发生在晚期（当template被特定实参具现化时）。c++一般惯于较早诊断，这也就是为什么“当base classes从templates中被具现化时”，它假设它对base classes的内容一无所知的原因。

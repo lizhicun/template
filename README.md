@@ -455,6 +455,36 @@ const rational<T> operator*(const rational<T> &lhs,const rational<T> &rhs) {}
 Rational<int> oneHalf(1,2);
 Rational<int> result = oneHalf *2;//error 编译失败
 ```
-#### 问题剖析
-在这里，编译器不知道我们想调用哪个函数。它在试图想出什么函数可以被名为operator*的template具现化出来。它知道它们应该可以具现出某个名为operator*且接受两个rational<T>参数的函数，但为了完成这一具现化行为，必须先算出T是什么。编译器无法做到。
+#### 问题剖析  
+operator\*的第一参数被声明为rational<T>,而传递给operator\*的第一实参oneHalf是Rational<int>,那可以肯定T是int.关键在于第二实参接受的应该是一个Rational<int>,但实际传入的却是int。T的推导无法确定。  
+    template实参推导过程中并不考虑隐式类型转换。这就是报错的关键。尽管隐式转换在函数调用过程中的确被使用，但在能调用一个函数之前，它必须已经存在（已被推导出并具现化）。  
 
+#### 解决方案
+```
+template <typename T>
+class Rational{
+public:
+    friend const rational operator*(const Rational& lhs,const Rational& rhs);
+};
+template<typename T>
+const Rational<T> operator*(const Rational<T>&lhs,const Rational<T>&rhs);
+```
+template class内的friend声明式可以指涉某个特定函数，那意味着class Rational<T>可以声明operator*是它的一个friend函数。class templates并不依赖于template实参推导（实参推导仅发生在function templates身上），所以编译器总是能在class rational<T>具现化时得知T.因此，令Rational<T> class 声明适当的operator*为其friend函数，可以简化整个问题
+
+#### 解决方案剖析
+这项技术的关键点在于：我们使用friend并不是因为我们想访问non-public成员。我们为了让类型转换可以用于所有实参，需要一个non-member函数。为了令它自动具现化，我们需要它位于class内部。综合二者，我们得到了friend.
+定义在class内部的函数都申请inline，包括friend函数。为了避免可能带来的高成本，一般而言，我们会令它不做任何事情，只是调用class外的一个辅助函数。
+```
+template<typename T> class Rational;
+template<typename T> const Rational<T> doMutiply(const Rational<T> &,......);
+template <typename T>
+class Rational{
+public:
+    friend const rational operator*(const Rational& lhs,const Rational& rhs){
+        return doMutiply(lhs,rhs);
+    }
+};
+```
+
+#### 总结
+* 当我们编写一个class template，而它提供的“与此template相关”函数需要“所有参数支持隐式转换时”，请将那些函数定义为friend函数,并在class template中定义它们。

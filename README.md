@@ -320,3 +320,36 @@ public:
 #### 总结
 上述的三种方法其实都是在做同一件事：对编译器承诺“base class template的任何特化版本都将支持其一般版本所提供的接口”。
 面对“指涉base class mrmbers”的无效references，编译器的诊断可能在早期（当解析dc template的定义式时），也可能发生在晚期（当template被特定实参具现化时）。c++一般惯于较早诊断，这也就是为什么“当base classes从templates中被具现化时”，它假设它对base classes的内容一无所知的原因。
+
+### 条款45.将参数无关的代码抽离template
+Templates是避免代码重复与节约时间的最优解。但有时，template可能会造成代码膨胀：二进制码带着大量重复（或几乎重复）的代码或者数据。其源码可能看起来优雅整洁，但实际上生成的object code完全不是一回事，我们需要对此进行优化。
+
+#### 实例分析
+为一个方阵编写template，其性质之一是支持求逆：
+```
+template<typename T,size_t n>
+class SquareMatrix{
+public:
+    void invert();//求逆矩阵
+}
+```
+假设会这样调用
+```
+SquareMatrix<double,5> sm1;
+sm1.invert();
+SquareMatrix<double,10> sm2;
+sm2.invert();
+```
+以上操作直接导致具现化了两个invert，虽然它们并非完全相同，但是相当类似，唯一的区别就是一个作用于5*5矩阵一个作用于10*10矩阵。
+... 没看懂 ...
+
+#### 总结
+* template生成多个class与多个函数，所以任何template代码都不应该与某个造成膨胀的template参数相互依存
+* 因为non-type template parameters造成的代码膨胀往往可以消除，做法是以函数参数或者class成员变量替换template参数。
+* 因type parameters造成的代码膨胀往往可以降低，做法是让带有相同二进制表述的具现类型共享实现码。
+
+### 条款46.运用member function template接受所有兼容类型
+
+#### 实例
+真实指针有一个很好用的功能：支持隐式转换。举例来说：
+* 

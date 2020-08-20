@@ -1,7 +1,7 @@
 # template
 ### 条款42.了解隐式接口与编译期多态
 
-#### OOP中的接口与多态
+#### 面向对象中的接口与多态
 
 面向对象编程以显式接口和运行期多态解决问题。举例而言：
 ```
@@ -488,3 +488,154 @@ public:
 
 #### 总结
 * 当我们编写一个class template，而它提供的“与此template相关”函数需要“所有参数支持隐式转换时”，请将那些函数定义为friend函数,并在class template中定义它们。
+
+### 条款48.使用traits classes表现类型信息
+
+#### 实例
+
+STL主要由“容器、迭代器、算法”的templates构成，但也覆盖了若干工具性templates，其中有一个名为advance，用来将迭代器移动若干距离。
+```
+template<typename IterT,typename Dist>
+void advance(IterT& iter,DistT d);
+```
+既然不同的迭代器具有不同的性质，那我们自然会想到：针对不同的迭代器，advance内部执行不同的操作
+```
+template<typename IterT,typename Dist>
+void advance(IterT &it,Dist d){
+    if(iter is random accesss iterator){
+        it+=d;
+    }
+    else{
+        while(...) ++it;
+    }
+}
+```
+这种做法必须首先判断当前迭代器是否为random access迭代器，也就是说需要取得类型的某些信息。这就是traits的工作：允许你在编译期获取某些类型信息。比如在这个例子中，需要在编译期获取不同类型迭代器是否满足"iter is random accesss iterator"这样的信息。
+
+#### Traits
+Traits并非是c++的某个关键词或者一个事先定义好的构件；这是一种技术，也是c++程序员共同遵循的协议。其内置要求之一是：对于内置类型与用户自定义类型的表现必须一样好。  
+
+#### traits的实现
+Traits必须可以施加于内置类型，表明我们不应该使用“在自定义类型里附加信息”的技术，因为原始指针无法附加信息。
+标准技术是把它放进一个template及一个或者多个特化版本中。针对迭代器的版本名为iterator_traits
+```
+template<typename IterT> 
+struct iterator_traits;//处理迭代器分类信息
+```
+
+#### Traits的运作方式
+仍以迭代器为例，iterator_traits的运作机理是，针对每一个类型IterT，在struct iterator_traits中必然声明了某个typedef名为iterator_category.这个typedef用来确认IterT的迭代器分类。
+
+#### 实现iterator_traits
+iterator_traits以两个部分来实现上述要求。
+首先，它要求每个“用户自定义的迭代器类型”必须嵌套一个typedef，名为iterator_category，用以确认当前的卷标结构。举例而言，deque的迭代器可能如下：
+```
+template<...> 
+class deque{
+public:
+    class iterator{
+    public:
+        typedef random_access_iterator_tag iterator_category;
+    };
+};
+```
+而list的迭代器可双向行进，所以它们应当这样：
+```
+template<...> 
+class list{
+public:
+    class iterator{
+    public:
+        typedef bidirectional_iterator_tag iterator_category；
+    };
+};
+```
+至于iterators_traits，则是被动响应iterator class的嵌套式typedef：
+```
+template<typename IterT>
+struct iterator_traits{
+    typedef typename IterT::iterator_category iterator_category;
+}
+```
+#### 半总结
+设计一个traits classes需要以下步骤：
+* 确认若干个你希望将来可以取得的信息（例如对迭代器的分类category）
+* 为该信息提供名称（如iterator_category）
+* 提供一个template与一组特化版本
+
+#### 解决方案
+有了iterator_traits后我们似乎可以执行先前的伪代码了
+```
+template<typename IterT,typename Dist>
+void advance(IterT& it,Dist d){
+    if(typeid(typename std::iterator_traits<IterT>::iterator_cagetory)==
+        typeid(std::random_access_iterator_tag))
+    ...
+}
+```
+现在先不去考虑无法编译的问题。正如我们所知，IterT是在编译期获知，所以iterator_traits<IterT>::iterator_category也可以在编译期间确定，关键在于if语句发生在运行期，怎么把它移动到编译期执行呢？  
+    
+    我们所需要的是一个能在编译期完成if…else操作的条件式，C++恰巧有某种特性支持这种行为：重载。  
+    
+    当我们重载某个函数f，我们必须详细叙述各个重载件的参数类型。当你调用f，编译期便根据实参选择最恰当的重载件。这简直为我们的问题量身定制。针对advance函数，我们所需要做的就是产生两版重载函数，内含advance的真正操作，但各自接受不同类型的iterator_category对象。具体如下所示：
+```
+template<typename IterT,typename Dist>
+void doadvance(IterT &iter,Dist d,std::random_access_iterator_tag){
+    iter+=d;
+}
+template<typename IterT,typename Dist>
+void doadvance(IterT &iter,Dist d,std::bidirectional_iterator_tag){
+    if(d>=0) {
+        while(d--) ++iter;
+    }
+    else{
+        while(d++) --iter;
+    }
+}
+template<typename IterT,typename Dist>
+void doadvance(IterT &iter,Dist d,std::input_iterator_tag){
+    if(d>=0) {
+        throw std::out_of_range("Negative distance");
+    }
+    else{
+        while(d--) ++iter;
+    }
+}
+```
+最终，advance函数的实现如下所示：
+```
+template<typename IterT,typename Dist>
+void advance(IterT &iter,Dist d){
+    doadvance(iter,d,typename std::iterator_traits<IterT>::iterator_category());
+}
+```
+#### 总结
+* traits class使得“类型相关信息”在编译期可用，它们以templates和偏特化完成实现。
+* 整合重载技术后我们可以在编译期执行ifelse测试。
+
+### 条款49.模板元编程
+#### 前言
+template metaprogramming(TMP 模板元编程)是编写template-based C++程序并执行于编译期的过程。  
+所谓TMP，指的是以C++写成、执行于C++编译器内的程序。一旦TMP程序结束执行，其输出，也就是template具现出的若干C++源码，便会一如既往地编译。
+#### TMP的优点
+* 让某些事情变得容易，如果没有它，则可能无法完成某些任务。
+* 由于TMP执行于编译期，所以可以将工作从运行期转移到编译期。这直接导致了运行期的错误可以提前到编译期。另外，程序的每一个方面效率都得到了提高（较小的执行文件、较短的运行期、较少的内存）。然而缺点是编译时间变得很长。
+#### 实例
+上一节所描述的traits解法就是TMP，它引发编译期发生于类型身上的if…else条件判断。traits-based TMP解法是针对不同类型执行不同代码，每个函数所使用的操作都确保可以实行于其类型。
+
+TMP已被证明是图灵完备的，你可以使用它声明变量、执行循环、编写调用函数等等。但你写出来的东西肯定明显和正常的c++不同，我们之前那一张用TMP写出来的ifelse就是如此（重载），不过那毕竟是汇编语言层级的TMP。
+
+为了大致地描述一下TMP的工作方式，我们首先看看循环操作。TMP没有循环构件，所以循环效果藉由递归完成。TMP主要是一个函数式语言，因此使用递归也十分自然。但是，TMP的递归也并非我们所熟知的递归，因为它并不涉及递归函数调用，而是涉及“递归模板具现化”。
+```
+template<unsigned n>
+struct Factorial{
+    enum {value = n*Factorial<n-1>::value};
+};
+template<>
+struct Factorial<0>{
+    enum{value =1};//递归基
+}
+```
+首先，每一个Factorial template都是一个struct，value用来保存当前计算所得的阶乘。如果TMP有循环构件，value应该在每一次循环中更新，但实际上由于TMP系以“递归模板具现化”取代循环，每一个具现体有一份自己的value，每一个value有其循环内的适当值。
+
+

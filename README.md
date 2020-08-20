@@ -352,4 +352,33 @@ sm2.invert();
 
 #### 实例
 真实指针有一个很好用的功能：支持隐式转换。举例来说：
-* 
+* derived class指针可以隐式转为base class指针
+* 指向non-const对象的指针可以指向const对象
+既然智能指针是行为如同原始指针的对象，那么我们当然希望智能指针也具备上述功能。具体来说，我们希望下述代码能够通过编译：
+```
+class Top;
+class Middle:public Top;
+template<typename T>
+class Smartptr{//自定义的智能指针
+public:
+    explicit Smartptr(T* realPtr);
+}
+Smartptr<Top> pt1 =Smart<Middle>(new Middle);
+Smartptr<const Top> pt2 = pt1;
+```
+但是，同一个template的不同具现化之间并不存在继承关系，所以，smartptr<top>与smartptr<middle>完全无关，为了达到我们期望的smart classes之间的转换能力，我们必须明确地编写它们。  
+
+#### 解决方案
+我们需要撰写的是一个构造模板。构造函数模板具体如下：
+```
+template<typename T>
+class SmartPtr{
+public:
+    template<typename U>
+    SmartPtr(const SmartPtr<U>& other);
+}
+```
+
+#### 方案剖析  
+    该构造函数模板声明：对于任何类型T和任何类型U，总可以根据一个SmartPtr<U>对象来构造一个SmartPtr<T>对象。我们把这种构造函数称为泛化copy构造函数。之所以不用explicit声明，是因为原始指针之间的转换就是隐式的，我们需要保证智能指针与原始指针之间的兼容性。  
+    声明固然已经完成，但是实现却值得花一番心思。并非任意的U型智能指针都能转为T型智能指针（比如把base转为derived），所以我们必须在某方面对这一member template所创建的成员函数群进行筛选。

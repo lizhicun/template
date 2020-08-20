@@ -380,5 +380,81 @@ public:
 ```
 
 #### 方案剖析  
-    该构造函数模板声明：对于任何类型T和任何类型U，总可以根据一个SmartPtr<U>对象来构造一个SmartPtr<T>对象。我们把这种构造函数称为泛化copy构造函数。之所以不用explicit声明，是因为原始指针之间的转换就是隐式的，我们需要保证智能指针与原始指针之间的兼容性。  
+该构造函数模板声明：对于任何类型T和任何类型U，总可以根据一个SmartPtr<U>对象来构造一个SmartPtr<T>对象。我们把这种构造函数称为泛化copy构造函数。之所以不用explicit声明，是因为原始指针之间的转换就是隐式的，我们需要保证智能指针与原始指针之间的兼容性。  
     声明固然已经完成，但是实现却值得花一番心思。并非任意的U型智能指针都能转为T型智能指针（比如把base转为derived），所以我们必须在某方面对这一member template所创建的成员函数群进行筛选。
+
+#### 解决方案的实现
+假设SmartPtr遵循shared_ptr的接口，存在一个get函数返回原始指针的副本，那我们则可以在构造模板中实现代码约束，具体如下：
+```
+template <typename T>
+class SmartPtr{
+public:
+    template <typename U>
+    SmartPtr(const SmartPtr<U> &other)
+        :helder(other.get()) {....}
+    T* get() const {return heldptr;}
+private:
+    T* heldPtr;
+}
+```
+
+#### 总结
+* 可使用member function template生成“可接受所有兼容类型”的函数
+
+### 条款25.若所有参数均需类型转换，请为此采用non-member函数
+
+假设我们建立了一个有理数类，它允许整数隐式转换为有理数：
+#### 实例
+```
+class Rational{
+public:
+    Rational(int numerator=0,int denominator=1);//刻意不写为explict
+    int numerator() const;//成员的访问函数
+    int denominator() const;
+    ...
+}
+```
+
+#### 运算符到底是写为member还是non-member呢
+首先考虑声明为member函数的情况：
+```
+const Rational operator* (const Rational& rhs) const;
+```
+那么很自然地，两个Rational对象可以很自由地相乘。但你会发现这个函数没法做到混合类型计算，比如说,一个int乘以一个ratioanl对象。
+```
+res = oneHalf * 2;//正确，因为执行了隐式转换
+res = 2 * oneHalf;//错误
+```
+不能编译的原因很简单，int并没有成员函数operator*。解决的方法也很简单，把operator*声明为non-member函数即可
+```
+const Rational operator* (const Rational& lhs,const Rational& rhs);
+```
+如此一来，混合类型计算的问题就得到了完美解决，哪怕两个参数都不是Rational，但只要它们存在直接变为Rational对象的隐式转换即可顺利编译与运行。
+
+#### 总结
+* 如果某个函数的所有参数都可能需要进行类型转换，那么这个函数必须是个non-member
+
+### 条款47.在需要类型转换时请为模板定义非成员函数
+
+#### 实例
+在上一次的实例中，我们以Rational class与operator讨论了在所有实参身上执行隐式转换。本次实例则将它们模板化。
+```
+template<typename T>
+class Rational{
+public:
+    Rational(const T& numerator = 0,const T& denominator = 1);
+    const T numerator() const;
+    const T denominator() const;
+}
+template<typename T>
+const rational<T> operator*(const rational<T> &lhs,const rational<T> &rhs) {}
+
+```
+我们预期以下代码也会通过编译，因为它们在非模板时确实编译成功了.但是失败了
+```
+Rational<int> oneHalf(1,2);
+Rational<int> result = oneHalf *2;//error 编译失败
+```
+#### 问题剖析
+在这里，编译器不知道我们想调用哪个函数。它在试图想出什么函数可以被名为operator*的template具现化出来。它知道它们应该可以具现出某个名为operator*且接受两个rational<T>参数的函数，但为了完成这一具现化行为，必须先算出T是什么。编译器无法做到。
+

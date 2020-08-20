@@ -81,3 +81,71 @@ T似乎必须要有一个size函数，但这个函数可能是从base class继�
 * classes的接口是显式的，以函数签名为中心，多态发生在运行期
 * templates的接口是隐式的，奠基于有效表达式。多态的实现则基于templates具现化和函数重载解析，发生于运行期。
 
+### 条款43.了解typename
+在template声明式中使用class与typename有什么不同吗？
+```
+template<class T> class Widget;
+template<typename T> class Widget;
+```
+没有  
+但下面的情况一定要用typename
+```
+template <typename C>
+void print2nd (const C& container){
+    if(container.size()>=2){
+        C::const_iterator iter(container.begin());
+        ++iter;
+        int value = *iter;
+        cout << value;
+    }
+}
+```
+
+#### 嵌套从属名称
+iter的类型是C::const_iterator,实际上它是什么取决于template参数C.template内出现的名字如果依赖于某个template参数，则称为从属名称。如果从属名称在class内程嵌套状(::)则称之为嵌套从属名称。  
+value是一个int，不依赖于任何template参数，于是它叫做非从属名称.
+
+#### 嵌套从属名称的风险
+嵌套从属名称可能会导致解析(parsing)困难。
+```
+template <typename C>
+void print2nd(const C& container){
+    C::const_iterator * x;
+}
+```
+窒息的操作...如果C中有一个static成员恰好被命名为const_iterator，又或者x恰好是一个global变量。那这个代码就是执行了一次相乘操作。
+
+#### 解决方案
+C++对于这种歧义状态有一种解析规则：如果编译器在template中遭遇了一个嵌套从属名称，它便假设该名称并非类型，除非你主动告诉它这是类型。（这个情况有一个小小的例外）。  
+想要程序正确运行，上文中的实例应该改为：
+```
+typename C::const_iterator iter;
+```
+任何时候你想在template内指涉一个嵌套从属类型名称，就必须在它之前放上一个typename.另外，typename只被用来验明嵌套从属类型名称，其它名称没必要用它。
+
+#### 小小的例外
+typename不可以出现在base classes list内的嵌套从属类型名称之前，也不可以在member initialization list中作为base class修饰符。举例而言：
+```
+template<typename T>
+class Derived:public Base<T>::Nested{// base classes list中禁止出现typename
+public:
+    explicit Derived(int x)
+        :Base<T>::Nested(x){//member initialization list中禁止出现typename
+            typename Base<T>::Nested temp;//需要typename
+        }
+    }
+}
+```
+
+#### typename与typedef
+由于某些声明式实在太长，所以讲typedef与typename相结合可能是一种不错的主意：
+```
+template<typename IterT>
+void workWithIterator(IterT iter){
+    typedef typename std::iterator_traits<IterT>::value_type value_type;
+}
+```
+#### 总结
+* 声明template参数时，class与typename意义相同。
+* 必须用typename标识嵌套从属类型名称，但在base class lists && member initialization list中禁止使用。
+
